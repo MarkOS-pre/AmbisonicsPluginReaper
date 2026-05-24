@@ -1,0 +1,397 @@
+desc:Ambisonics plugin
+
+/* Importar archivos externos */
+import Filtros.jsfx-inc
+import Graficos.jsfx-inc
+import Binaural.jsfx-inc
+
+
+/* Definición de sliders */
+
+slider1:0<-180,180,0.1>Azimuth (grados)
+slider2:0<-90,90,0.1>Elevacion (grados)
+slider3:0.5<0,1,0.01>Patron (0=Fig8, 0.5=Card, 1=Omni)
+slider4:30<30,180> Angulo estereo (grados)
+slider5:0<0,3,1{ Mono, Estereo, Binaural, Quadrafonico}> Salida (Mono - Estereo - Binaural - Quadrafonico)
+slider6:1<0,1,1{ Activado, Desactivado}> Filtro corrector
+slider7:0<-3,50,0.1> Volumen Binaural (dB)
+
+
+/* Entradas y salidas */
+
+in_pin:Entrada1
+in_pin:Entrada2
+in_pin:Entrada3
+in_pin:Entrada4
+
+out_pin:Salida1
+out_pin:Salida2
+out_pin:Salida3
+out_pin:Salida4
+
+
+
+@init
+
+init = 0;
+grad_a_rad = $pi/180;
+
+// Inicializar filtro W 
+filtro_shelving_W(4000, +3);
+
+// Inicializar filtro XYZ
+filtro_shelving_XYZ(4000, -3);
+
+//Inicializar buffers
+inicializarBuffers();
+
+//Cargar los ficheros WAV con las HTRF
+cargarFicherosWAV();
+
+//Realziar la FFT del buffer impulseBuffer
+prepararKernelsFFT();
+
+@slider
+
+
+az = slider1*grad_a_rad;
+el = slider2*grad_a_rad;
+ang = slider4*grad_a_rad;
+preamp = 10^(slider7/20);
+(slider5 != 3) ?
+(
+  alpha = slider3;
+  beta = 1 - alpha;
+):(
+  alpha = (sqrt(2)/4);
+  beta = (2/4);
+);
+
+
+// Calculo de cosenos y senos
+
+ca = cos(az);  sa = sin(az);
+ce = cos(el);  se = sin(el);
+//cr = cos(ro);  sr = sin(ro);
+
+ca_iz = cos(az + ang/2); sa_iz = sin(az + ang/2);
+ca_dr = cos(az - ang/2); sa_dr = sin(az - ang/2);
+
+
+
+
+
+/* Matrizes de rotacion */
+
+//mono
+rm11 = ca*ce; 
+rm21 = sa*ce;
+rm31 = se;
+
+//estereo
+
+//izqui
+
+ri11 = ca_iz*ce; 
+ri21 = sa_iz*ce;
+ri31 = se;
+
+//derecho
+
+rd11 = ca_dr*ce; 
+rd21 = sa_dr*ce;
+rd31 = se;
+
+//Quad
+
+//L
+qrl11 = ca_iz;
+qrl21 = sa_iz;
+
+//R
+qrr11 = ca_dr;
+qrr21 = sa_dr;
+
+//SL
+qrsl11 = -ca_dr;
+qrsl21 = -sa_dr;
+
+//SR
+qrsr11 = -ca_iz;
+qrsr21 = -sa_iz;
+
+
+
+//Inicializar coeficientes de interpolación
+
+(init == 0) ? 
+(
+  r11_cur = rm11;
+  r21_cur = rm21;
+  r31_cur = rm31;
+  
+  ri11_cur = ri11;
+  ri21_cur = ri21;
+  ri31_cur = ri31;
+  
+  rd11_cur = rd11;
+  rd21_cur = rd21;
+  rd31_cur = rd31;
+  
+  qrl11_cur = qrl11;
+  qrl21_cur = qrl21;
+  qrr11_cur = qrr11;
+  qrr21_cur = qrr21;
+  qrsl11_cur = qrsl11;
+  qrsl21_cur = qrsl21;
+  qrsr11_cur = qrsr11;
+  qrsr21_cur = qrsr21;
+  
+  preamp_cur = preamp;
+  
+  init = 1;
+);
+
+@block
+
+rmInc11 = (rm11 - r11_cur)/samplesblock;
+rmInc21 = (rm21 - r21_cur)/samplesblock;
+rmInc31 = (rm31 - r31_cur)/samplesblock;
+
+riInc11 = (ri11 - ri11_cur) / samplesblock;
+riInc21 = (ri21 - ri21_cur) / samplesblock;
+riInc31 = (ri31 - ri31_cur) / samplesblock;
+
+rdInc11 = (rd11 - rd11_cur) / samplesblock;
+rdInc21 = (rd21 - rd21_cur) / samplesblock;
+rdInc31 = (rd31 - rd31_cur) / samplesblock;
+
+qrl11_inc = (qrl11 - qrl11_cur) / samplesblock;
+qrl21_inc = (qrl21 - qrl21_cur) / samplesblock;
+qrr11_inc = (qrr11 - qrr11_cur) / samplesblock;
+qrr21_inc = (qrr21 - qrr21_cur) /samplesblock;
+qrsl11_inc = (qrsl11 - qrsl11_cur) /samplesblock;
+qrsl21_inc = (qrsl21 - qrsl21_cur) / samplesblock;
+qrsr11_inc = (qrsr11 - qrsr11_cur) / samplesblock;
+qrsr21_inc = (qrsr21 - qrsr21_cur) / samplesblock;
+
+preamp_inc = (preamp - preamp_cur) / samplesblock;
+
+
+@sample
+/***** captura de señales de capsulas *****/
+
+sLF = spl0; sRF = spl1; sLB = spl2; sRB = spl3;
+
+/***** codificación en formato B ******/
+
+//N3D
+
+W = 0.5*(sLF + sRF + sLB + sRB);
+X = 0.5*sqrt(3)*(sLF + sRF - sLB - sRB);
+Y = 0.5*sqrt(3)*(sLF - sRF + sLB - sRB);
+Z = 0.5*sqrt(3)*(sLF - sRF - sLB + sRB);
+
+
+//SN3D
+/*
+W = 0.5*(sLF + sRF + sLB + sRB);
+X = 0.5*(sLF + sRF - sLB - sRB);
+Y = 0.5*(sLF - sRF + sLB - sRB);
+Z = 0.5*(sLF - sRF - sLB + sRB);
+*/
+
+
+//W = W/sqrt(3);
+
+/****** Filtro corrector *******/
+
+slider6 == 0 ?
+(
+  W = aplicar_filtro_W(W);
+  X = aplicar_filtro_X(X);
+  Y = aplicar_filtro_Y(Y);
+  Z = aplicar_filtro_Z(Z);
+);
+
+
+//Interpolar coeficientes
+r11_cur += rmInc11;
+r21_cur += rmInc21;
+r31_cur += rmInc31;
+
+ri11_cur += riInc11;
+ri21_cur += riInc21;
+ri31_cur += riInc31;
+
+rd11_cur += rdInc11;
+rd21_cur += rdInc21;
+rd31_cur += rdInc31;
+
+qrl11_cur += qrl11_inc;
+qrl21_cur += qrl21_inc;
+qrr11_cur += qrr11_inc;
+qrr21_cur += qrr21_inc;
+qrsl11_cur += qrsl11_inc;
+qrsl21_cur += qrsl21_inc;
+qrsr11_cur += qrsr11_inc;
+qrsr21_cur += qrsr21_inc;
+
+preamp_cur += preamp_inc;
+
+/******* Decodificación *******/
+
+//Decodificación en mono
+slider5 == 0 ?
+(
+  bidireccional = X*r11_cur + Y*r21_cur + Z*r31_cur;
+  mic_virtual = alpha * W + beta * bidireccional;                  
+ 
+ //salida
+  spl0 = mic_virtual;
+  spl1 = mic_virtual;
+  spl2 = 0.;
+  spl3 = 0.;
+  
+
+);
+
+ //Decodificación en stereo
+slider5 == 1 ? 
+(
+  
+  bidirI = ri11_cur*X + ri21_cur*Y + ri31_cur*Z;
+  bidirD = rd11_cur*X + rd21_cur*Y + rd31_cur*Z;;
+  
+  out_L = alpha * W +  beta * bidirI;
+  out_R = alpha * W +  beta * bidirD;;
+  
+  
+  spl0 = out_L;
+  spl1 = out_R;
+  spl2 = 0.;
+  spl3 = 0.;
+  
+);
+
+slider5 == 2 ? (
+
+
+    bidireccional = X*r11_cur + Y*r21_cur + Z*r31_cur;
+  
+    mic_virtual = alpha * W + beta * bidireccional; 
+  
+  
+    bufferPosition2 = bufferPosition * 2;
+    
+    //Escribe las muestras de los mics. virtuales en los next buffers
+    blockNextBufferL[bufferPosition2] = mic_virtual;
+    blockNextBufferL[bufferPosition2 + 1] = 0;
+    blockNextBufferR[bufferPosition2] = mic_virtual;
+    blockNextBufferR[bufferPosition2 + 1] = 0;
+    
+    // Lee las muestras convolucionadas
+    // La parte real (indice par) es el canal de audio
+    // La parte imaginaría (indice impar) se descarta
+    spl0 = blockCurrentBufferL[bufferPosition2];
+    spl1 = blockCurrentBufferR[bufferPosition2];
+    // spl0 = blockCurrentBuffer[bufferPosition2] ;
+     //spl1 = blockCurrentBuffer[bufferPosition2+1] ;
+   
+    
+    //Añade solapamiento del bloque anterior
+    bufferPosition < (muestrasNuevas) ? (
+      spl0 += blockNextBufferL[muestrasNuevas2 + bufferPosition2];
+      spl1 += blockNextBufferR[muestrasNuevas2 + bufferPosition2];
+       //spl0 += blockNextBuffer[muestrasNuevas2 + bufferPosition2];
+       //spl1 += blockNextBuffer[muestrasNuevas2 + bufferPosition2 + 1];
+    );
+    
+    bufferPosition += 1;
+    
+    //Cuando el buffer este lleno es momento de convolucionar
+    bufferPosition >= muestrasNuevas ? (
+      convolucionarBloqueFFT();
+    );
+    spl0 = spl0 * preamp;
+    spl1 = spl1 * preamp;
+    spl2 = 0.;
+    spl3 = 0.;
+    
+  
+);
+
+slider5 == 3 ? (
+
+  //Decodificación cuadrafónica - tipo fisica
+  
+  bidirQL  = qrl11_cur  * X + qrl21_cur  * Y;
+  bidirQR  = qrr11_cur  * X + qrr21_cur  * Y;
+  bidirQSL = qrsl11_cur * X + qrsl21_cur * Y;
+  bidirQSR = qrsr11_cur * X + qrsr21_cur * Y;
+
+  mic_quad_L = alpha*W + beta*bidirQL;
+  mic_quad_R = alpha*W + beta*bidirQR;
+  mic_quad_SL = alpha*W + beta*bidirQSL;
+  mic_quad_SR = alpha*W + beta*bidirQSR;
+  
+  spl0 = mic_quad_L;
+  spl1 = mic_quad_R;
+  spl2 = mic_quad_SL;
+  spl3 = mic_quad_SR;
+  
+  );
+  
+    
+  
+
+@gfx 600 300
+
+/* Se define el centro del diagrama polar horizontal (cx1, cy)    */
+/* y del diagrama polar vertical (cx2, cy). Tambíen se establece  */
+/* el radio maximo del gráfico a dibujar                          */
+   
+cx1 = gfx_w *0.25; cx2 = gfx_w *0.75; cy = gfx_h*0.5;
+radio = min(gfx_w, gfx_h) * 0.35;
+
+//Dibujar circunferencias de atenuación
+dibujar_atenuaciones(cx1, cy ,radio);
+dibujar_atenuaciones(cx2, cy ,radio);
+
+// Dibujar los patrones polares para salidas mono y biaural
+(slider5 == 0 || slider5 == 2) ? (
+  
+  //Dibujar plano azimuth
+  dibujar_mic(az, cx1, cy, radio, alpha, beta);
+  
+  //Dibujar plano elevación
+  dibujar_mic(el - $pi/2, cx2, cy, radio, alpha, beta);
+);
+
+// Dibujar los patrones polares para salida estereo
+(slider5 == 1 ) ? (
+  
+  //Dibujar plano azimuth
+  dibujar_mic(az + ang/2, cx1, cy, radio, alpha, beta);
+  dibujar_mic(az - ang/2, cx1, cy, radio, alpha, beta);
+  
+  //Dibujar plano elevación
+  dibujar_mic(el - $pi/2, cx2, cy, radio, alpha, beta);
+);
+
+//Dibujar los patrones polares para saldia quadrafónica
+(slider5 == 3) ? (
+
+  //Dibujar plano azimuth
+  dibujar_mic(az + ang/2, cx1, cy, radio, alpha, beta);
+  dibujar_mic(az - ang/2, cx1, cy, radio, alpha, beta);
+  dibujar_mic(az - ang/2 + $pi, cx1, cy, radio, alpha, beta);
+  dibujar_mic(az + ang/2 + $pi, cx1, cy, radio, alpha, beta);
+  );
+
+
+  
+
+
+
+

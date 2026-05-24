@@ -1,0 +1,101 @@
+@init
+
+
+/* Funcion que dibuja un micrófono con patrón polar definido por alpha y beta */
+/* angulo: rotación del microfono en radianes                                 */
+/* cx, cy: coordenadas del centro del gráfico                                 */
+/* radio: tamaño maximo del gráfico                                           */
+/* alpha_p, beta_p: parámetros del patrón polar (alpha + beta * cos)          */
+
+function dibujar_mic(angulo, cx, cy , radio, alpha_p, beta_p) 
+(
+  gfx_a = 0.60;
+  
+  iter = 0;
+  while(iter <= 2*$pi) (
+    // Radio según el patrón (alpha + beta * cos)
+    r_p = alpha_p + beta_p * cos(iter);
+    
+    r_p >= 0 ? (
+      gfx_r = 0.4; gfx_g = 0.8; gfx_b = 1;
+    ):(
+      gfx_r = 1; gfx_g = 0.8; gfx_b = 0.4;
+    );
+    
+    r_abs = abs(r_p);
+    
+    // Coordenadas de pantalla (0º es arriba)
+    p_x = cx - sin(iter + angulo) * r_abs * radio;
+    p_y = cy - cos(iter + angulo) * r_abs * radio;
+    
+    iter == 0 ? (
+      gfx_x = p_x; gfx_y = p_y;
+    ) : (
+      gfx_lineto(p_x, p_y, 1);
+    );
+    iter += 0.05; 
+  );
+  gfx_a = 0.5; gfx_r=1; gfx_g=1; gfx_b=1;
+  cx == gfx_w *0.25 ? (
+    gfx_circle(cx, cy - radio, 2, 1);
+  ):(
+    gfx_circle(cx+radio, cy, 2, 1);
+  );
+  
+);
+
+/*  Funcion que dibuja círculos concéntricos para representar atenuaciones de -3 dB por paso 
+    cx, cy: coordenadas del centro del gráfico
+    radio: tamaño máximo del gráfico
+*/
+
+function dibujar_atenuaciones(cx, cy, radio)
+(
+  gfx_a = 0.60;
+
+  // cruz central
+  gfx_line(cx - radio, cy, cx + radio, cy);
+  gfx_line(cx, cy - radio, cx, cy + radio);
+
+  gfx_a = 0.20;
+
+  // factores de atenuación (-3 dB por paso)
+  fact[0] = 1;
+  fact[1] = 1/sqrt(2);
+  fact[2] = 1/2;
+  fact[3] = 1/(2*sqrt(2));
+
+  i = 0;
+  loop(4,
+    r = radio * fact[i];
+
+    iter = 0;
+
+    while(iter <= 2*$pi)(
+
+      p_x = cx + sin(iter) * r;
+      p_y = cy - cos(iter) * r;
+
+      iter == 0 ? (
+        gfx_x = p_x; gfx_y = p_y;
+        first = 0;
+      ) : (
+        gfx_lineto(p_x, p_y, 1);
+      );
+
+      iter += 0.05;
+    );
+
+    i += 1;
+  );
+
+  gfx_x = cx + radio - 100;
+  gfx_y = cy - radio;
+
+  gfx_a = 0.5; gfx_r=1; gfx_g=1; gfx_b=1;
+
+  gfx_setfont("Arial", 16, 'i');
+
+  gfx_drawstr(" -3 dB/circ ", gfx_x , gfx_y);
+
+);
